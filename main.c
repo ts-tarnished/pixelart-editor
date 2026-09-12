@@ -16,153 +16,198 @@
 #define CANVAS_INITIAL_ZOOM 10
 
 typedef struct {
+	int x;
+	int y;
 	int width;
 	int height;
+} Rectangle;
+
+typedef struct {
 	int capacity;
 	uint32_t *pixels;
 	int zoom;
+	Rectangle collider;
+	uint32_t activeColor;
 } EditorCanvas;
 
-static Jup_Window *window;
-static EditorCanvas editor_canvas;
+typedef struct {
+	uint32_t colors[8];
+	Rectangle colliders[8];
+} Palette;
 
-EditorCanvas create_editor_canvas() {
+static Jup_Window *window;
+static EditorCanvas editorCanvas;
+static Palette palette;
+
+EditorCanvas createEditorCanvas() {
 	int capacity = CANVAS_INITIAL_WIDTH * CANVAS_INITIAL_HEIGHT;
-	uint32_t *canvas_pixels = malloc(capacity * sizeof(uint32_t));
-	if (canvas_pixels == NULL) {
+	uint32_t *canvasPixels = malloc(capacity * sizeof(uint32_t));
+	if (canvasPixels == NULL) {
 		fprintf(stderr, "Error: Failed to allocate memory\n.");
 		exit(1);
 	}
 	for (int i = 0; i < capacity; i++) {
-		canvas_pixels[i] = 0xFFFFFF;
+		canvasPixels[i] = 0xFFFFFF;
 	}
-	return (EditorCanvas) {
+
+	Rectangle collider = {
+		.x = 0,
+		.y = 0,
 		.width = CANVAS_INITIAL_WIDTH,
 		.height = CANVAS_INITIAL_HEIGHT,
-		.capacity = capacity,
-		.pixels = canvas_pixels,
-		.zoom = CANVAS_INITIAL_ZOOM
+	};
+	return (EditorCanvas) {
+		.collider = collider,
+			.capacity = capacity,
+			.pixels = canvasPixels,
+			.zoom = CANVAS_INITIAL_ZOOM
 	};
 }
 
-void free_editor_canvas(EditorCanvas editor_canvas) {
-	free(editor_canvas.pixels);
+void freeEditorCanvas(EditorCanvas editorCanvas) {
+	free(editorCanvas.pixels);
 }
 
-bool editor_canvas_get_pixel(int x, int y, uint32_t *color) {
-	if (x > editor_canvas.width || x < 0 || y > editor_canvas.height || y < 0) {
+bool getEditorCanvasPixel(int x, int y, uint32_t *color) {
+	if (x > editorCanvas.collider.width || x < 0 || y > editorCanvas.collider.height || y < 0) {
 		return false;
 	}
-	*color = editor_canvas.pixels[x + y * editor_canvas.width];
+	*color = editorCanvas.pixels[x + y * editorCanvas.collider.width];
 	return true;
 }
 
-void editor_canvas_set_pixel(int x, int y, uint32_t color) {
-	if (x >= editor_canvas.width || y >= editor_canvas.height || x < 0 || y < 0) 
+void setEditorCanvasPixel(int x, int y, uint32_t color) {
+	if (x >= editorCanvas.collider.width || y >= editorCanvas.collider.height || x < 0 || y < 0)
 		return;
-	editor_canvas.pixels[x + y * editor_canvas.width] = color;
+	editorCanvas.pixels[x + y * editorCanvas.collider.width] = color;
 }
 
-void draw_rectangle(Jup_Window *window, uint32_t *frame_buffer, int x, int y, int width, int height, uint32_t color) {
+void drawRectangle(int x, int y, int width, int height, uint32_t color) {
 	// TODO: out of bounds check
-	for (int _y = y; _y <= y + height; _y++) {
-		for (int _x = x; _x <= x + width; _x++) {
-			frame_buffer[_x + _y * window->width] = color;
+	for (int _y = y; _y < y + height; _y++) {
+		for (int _x = x; _x < x + width; _x++) {
+			window->frameBuffer[_x + _y * window->width] = color;
 		}
 	}
 }
 
-void on_window_click(float x, float y, int mouse_btn) {
-	return;
+void drawRectangleRect(Rectangle rectangle, uint32_t color) {
+	for (int y = rectangle.y; y < rectangle.y + rectangle.height; y++) {
+		for (int x = rectangle.x; x < rectangle.x + rectangle.width; x++) {
+			window->frameBuffer[x + y * window->width] = color;
+		}
+	}
+}
+
+bool inRectangle(int x, int y, Rectangle rectangle) {
+	if (x > rectangle.x + rectangle.width ||
+			y > rectangle.y + rectangle.height ||
+			x < rectangle.x || y < rectangle.y) {
+		return false;
+	}
+
+	return true;
+}
+
+void onWindowClick(float x, float y, int mouse_btn) {
 	if (mouse_btn != 1) {
 		return;
 	}
 
-	int canvas_x = x / editor_canvas.zoom;
-	int canvas_y = y / editor_canvas.zoom;
-	editor_canvas_set_pixel(canvas_x, canvas_y, 0);
-	for (int y = 0; y < editor_canvas.height; y++) {
-		for (int x = 0; x < editor_canvas.width; x++) {
-			uint32_t color;
-			bool success = editor_canvas_get_pixel(x, y, &color);
-			if (!success) {
-				fprintf(stderr, "Error: Pixel out of bounds.\n");
-				exit(1);
-			}
-			draw_rectangle(window, window->frame_buffer,
-					x*editor_canvas.zoom,
-					y*editor_canvas.zoom, 
-					editor_canvas.zoom, 
-					editor_canvas.zoom, color);
+	for (int i = 0; i < 8; i++) {
+		if (inRectangle(x, y, palette.colliders[i])) {
+			editorCanvas.activeColor = palette.colors[i];
 		}
 	}
+	
 }
 
-void on_left_mouse_down() {
-	int canvas_x = window->mouse_x / editor_canvas.zoom;
-	int canvas_y = window->mouse_y / editor_canvas.zoom;
-	editor_canvas_set_pixel(canvas_x, canvas_y, 0);
-	for (int y = 0; y < editor_canvas.height; y++) {
-		for (int x = 0; x < editor_canvas.width; x++) {
+void onLeftMouseDown() {
+	int canvasX = window->mouseX / editorCanvas.zoom;
+	int canvasY = window->mouseY / editorCanvas.zoom;
+	setEditorCanvasPixel(canvasX, canvasY, editorCanvas.activeColor);
+	for (int y = 0; y < editorCanvas.collider.height; y++) {
+		for (int x = 0; x < editorCanvas.collider.width; x++) {
 			uint32_t color;
-			bool success = editor_canvas_get_pixel(x, y, &color);
+			bool success = getEditorCanvasPixel(x, y, &color);
 			if (!success) {
 				fprintf(stderr, "Error: Pixel out of bounds.\n");
 				exit(1);
 			}
-			draw_rectangle(window, window->frame_buffer,
-					x*editor_canvas.zoom,
-					y*editor_canvas.zoom, 
-					editor_canvas.zoom, 
-					editor_canvas.zoom, color);
+			drawRectangle(
+					x*editorCanvas.zoom,
+					y*editorCanvas.zoom,
+					editorCanvas.zoom,
+					editorCanvas.zoom, color);
 		}
 	}
 }
 
 int main (void) {
-	uint32_t *frame_buffer = calloc(MAX_WIDTH*MAX_HEIGHT, sizeof(uint32_t));
+	uint32_t *frameBuffer = calloc(MAX_WIDTH*MAX_HEIGHT, sizeof(uint32_t));
 	for (int i = 0; i < MAX_WIDTH*MAX_HEIGHT; i++ ) {
-		frame_buffer[i] = 0xCCCCCC;
+		frameBuffer[i] = 0xCCCCCC;
 	}
 
-	Jup_CreateWindowArgs create_window_args = (Jup_CreateWindowArgs) {
+	Jup_CreateWindowArgs create_window_args = {
 		.width = INITIAL_WINDOW_WIDTH,
 		.height = INITIAL_WINDOW_HEIGHT,
-		.window_title = "Pixelart Editor",
-		.frame_buffer = frame_buffer,
-		.on_click = on_window_click
+		.windowTitle = "Pixelart Editor",
+		.frameBuffer = frameBuffer,
+		.onClick = onWindowClick
 	};
 	window = Jup_CreateWindow(create_window_args);
 
-	editor_canvas = create_editor_canvas();
-	editor_canvas_set_pixel(2, 2, 0);
-	for (int y = 0; y < editor_canvas.height; y++) {
-		for (int x = 0; x < editor_canvas.width; x++) {
+	editorCanvas = createEditorCanvas();
+	for (int y = 0; y < editorCanvas.collider.height; y++) {
+		for (int x = 0; x < editorCanvas.collider.width; x++) {
 			uint32_t color;
-			bool success = editor_canvas_get_pixel(x, y, &color);
+			bool success = getEditorCanvasPixel(x, y, &color);
 			if (!success) {
 				fprintf(stderr, "Error: Pixel out of bounds.\n");
 				exit(1);
 			}
-			draw_rectangle(window, frame_buffer,
-					x*editor_canvas.zoom,
-					y*editor_canvas.zoom, 
-					editor_canvas.zoom, 
-					editor_canvas.zoom, color);
+			drawRectangle(
+					x*editorCanvas.zoom,
+					y*editorCanvas.zoom,
+					editorCanvas.zoom,
+					editorCanvas.zoom, color);
 		}
-	}
-	
-	struct timespec requested_t = { .tv_sec = 0, .tv_nsec = 16666667 };
-	struct timespec remaining_t;
-	while (!Jup_WindowShouldClose(window)) {
-		if (window->mouse_down[1]) {
-			on_left_mouse_down();
-		}
-		Jup_DrawPixels(window);
-		nanosleep(&requested_t, &remaining_t);
 	}
 
-	free_editor_canvas(editor_canvas);
+	palette.colors[0] = 0x000000;
+	palette.colors[1] = 0xFF0000;
+	palette.colors[2] = 0x00FF00;
+	palette.colors[3] = 0x0000FF;
+	palette.colors[4] = 0xFFFF00;
+	palette.colors[5] = 0xFF00FF;
+	palette.colors[6] = 0x00FFFF;
+	palette.colors[7] = 0xFFFFFF;
+	editorCanvas.activeColor = 0x000000;
+
+	for (int i = 0; i < 8; i++) {
+		palette.colliders[i] = (Rectangle) {
+			.x = window->width - (4 + 20)*(i+1),
+				.y = 0,
+				.width = 20,
+				.height = 20
+		};
+
+		drawRectangleRect(palette.colliders[i], palette.colors[i]);
+	}
+
+	struct timespec requestedTime = { .tv_sec = 0, .tv_nsec = 16666667 };
+	struct timespec remainingTime;
+
+	while (!Jup_WindowShouldClose(window)) {
+		if (window->mouseDown[1]) {
+			onLeftMouseDown();
+		}
+		Jup_DrawPixels(window);
+		nanosleep(&requestedTime, &remainingTime);
+	}
+
+	freeEditorCanvas(editorCanvas);
 	Jup_FreeAndClose(window);
 	return 0;
 }
