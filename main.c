@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 #define JUST_PIXELS_IMPLEMENTATION
@@ -14,6 +15,9 @@
 #define CANVAS_INITIAL_WIDTH 30
 #define CANVAS_INITIAL_HEIGHT 30
 #define CANVAS_INITIAL_ZOOM 10
+#define CANVAS_OFFSET_X 0
+#define CANVAS_OFFSET_Y 80
+#define TOP_BAR_HEIGHT 50
 
 typedef struct {
 	int x;
@@ -32,12 +36,18 @@ typedef struct {
 
 typedef struct {
 	uint32_t colors[8];
-	Rectangle colliders[8];
+	Rectangle btnColliders[8];
+	Rectangle boundary;
 } Palette;
+
+typedef struct {
+	Rectangle boundary;
+} TopBar;
 
 static Jup_Window *window;
 static EditorCanvas editorCanvas;
 static Palette palette;
+static TopBar topBar;
 
 EditorCanvas createEditorCanvas() {
 	int capacity = CANVAS_INITIAL_WIDTH * CANVAS_INITIAL_HEIGHT;
@@ -109,23 +119,91 @@ bool inRectangle(int x, int y, Rectangle rectangle) {
 	return true;
 }
 
+void loadImage(char *filePath) {
+	if (filePath == NULL) {
+		fprintf(stderr, "Error: file must not be null.\n");
+		exit(1);
+	}
+
+	FILE *file =fopen(filePath, "rb");
+	if (file == NULL) {
+		fprintf(stderr, "Error: Failed to open the file.\n");
+		exit(1);
+	}
+
+	char header[3];
+	fscanf(file, "%2s", header);
+	if (strcmp(header, "P6")) {
+		fprintf(stderr, "Error: Invalid file format.\n");
+		fclose(file);
+		exit(1);
+	}
+
+	int width = 0, height = 0;
+	if (fscanf(file, "%i %i", &width, &height) != 2) {
+		fprintf(stderr, "Error: Invalid file format.\nCould not parse width and height.");
+		fclose(file);
+		exit(1);
+	}
+	editorCanvas.collider.width = width;
+	editorCanvas.collider.height = height;
+
+	uint32_t *newPointer = realloc(editorCanvas.pixels, width * height * sizeof(uint32_t));
+	if (newPointer == NULL) {
+		fprintf(stderr, "Error: Failed to allocate memory.\n");
+		fclose(file);
+		exit(1);
+	}
+	editorCanvas.pixels = newPointer;
+	while (getc(file) != '\n');
+	while (getc(file) != '\n');
+	for (int i = 0; i < width * height; i++) {
+		unsigned char rgb[3];
+		fread(&rgb, 1, 3, file);
+		uint32_t color = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+		editorCanvas.pixels[i] = color;
+
+	}
+
+	fclose(file);
+}
+
+void savePpm() {
+	FILE *file = fopen("./piximage.ppm", "wb");
+	if (file == NULL) {
+		fprintf(stderr, "Error: Failed to open image file.\n");
+		exit(1);
+	};
+	
+	fprintf(file, "P6\n%i %i\n255\n", editorCanvas.collider.width, editorCanvas.collider.height);
+	for (int i = 0; i < editorCanvas.capacity; i++) {
+		unsigned char color[3];
+            	color[0] = (editorCanvas.pixels[i] & 0xFF0000) >> 16;
+            	color[1] = (editorCanvas.pixels[i] & 0x00FF00) >> 8;
+            	color[2] = (editorCanvas.pixels[i] & 0x0000FF) >> 0;
+		fwrite(color, 1, 3, file);
+	}
+	fclose(file);
+}
+
 void onWindowClick(float x, float y, int mouse_btn) {
 	if (mouse_btn != 1) {
 		return;
 	}
 
+	if (inRectangle(x, y, topBar.boundary)) {
+		savePpm();
+	}
+
 	for (int i = 0; i < 8; i++) {
-		if (inRectangle(x, y, palette.colliders[i])) {
+		if (inRectangle(x, y, palette.btnColliders[i])) {
 			editorCanvas.activeColor = palette.colors[i];
 		}
 	}
 	
 }
 
-void onLeftMouseDown() {
-	int canvasX = window->mouseX / editorCanvas.zoom;
-	int canvasY = window->mouseY / editorCanvas.zoom;
-	setEditorCanvasPixel(canvasX, canvasY, editorCanvas.activeColor);
+void drawEditorCanvas() {
 	for (int y = 0; y < editorCanvas.collider.height; y++) {
 		for (int x = 0; x < editorCanvas.collider.width; x++) {
 			uint32_t color;
@@ -135,15 +213,22 @@ void onLeftMouseDown() {
 				exit(1);
 			}
 			drawRectangle(
-					x*editorCanvas.zoom,
-					y*editorCanvas.zoom,
+					x*editorCanvas.zoom + CANVAS_OFFSET_X,
+					y*editorCanvas.zoom + CANVAS_OFFSET_Y,
 					editorCanvas.zoom,
 					editorCanvas.zoom, color);
 		}
 	}
 }
 
-int main (void) {
+void onLeftMouseDown() {
+	int canvasX = (window->mouseX - CANVAS_OFFSET_X) / editorCanvas.zoom;
+	int canvasY = (window->mouseY - CANVAS_OFFSET_Y) / editorCanvas.zoom;
+	setEditorCanvasPixel(canvasX, canvasY, editorCanvas.activeColor);
+	drawEditorCanvas();
+}
+
+int main (int argc, char *argv[]) {
 	uint32_t *frameBuffer = calloc(MAX_WIDTH*MAX_HEIGHT, sizeof(uint32_t));
 	for (int i = 0; i < MAX_WIDTH*MAX_HEIGHT; i++ ) {
 		frameBuffer[i] = 0xCCCCCC;
@@ -159,21 +244,10 @@ int main (void) {
 	window = Jup_CreateWindow(create_window_args);
 
 	editorCanvas = createEditorCanvas();
-	for (int y = 0; y < editorCanvas.collider.height; y++) {
-		for (int x = 0; x < editorCanvas.collider.width; x++) {
-			uint32_t color;
-			bool success = getEditorCanvasPixel(x, y, &color);
-			if (!success) {
-				fprintf(stderr, "Error: Pixel out of bounds.\n");
-				exit(1);
-			}
-			drawRectangle(
-					x*editorCanvas.zoom,
-					y*editorCanvas.zoom,
-					editorCanvas.zoom,
-					editorCanvas.zoom, color);
-		}
+	if (argc > 1) {
+		loadImage(argv[1]);
 	}
+	drawEditorCanvas();
 
 	palette.colors[0] = 0x000000;
 	palette.colors[1] = 0xFF0000;
@@ -186,15 +260,20 @@ int main (void) {
 	editorCanvas.activeColor = 0x000000;
 
 	for (int i = 0; i < 8; i++) {
-		palette.colliders[i] = (Rectangle) {
+		palette.btnColliders[i] = (Rectangle) {
 			.x = window->width - (4 + 20)*(i+1),
-				.y = 0,
+				.y = TOP_BAR_HEIGHT,
 				.width = 20,
 				.height = 20
 		};
 
-		drawRectangleRect(palette.colliders[i], palette.colors[i]);
+		drawRectangleRect(palette.btnColliders[i], palette.colors[i]);
 	}
+
+	topBar.boundary = (Rectangle) {
+		.x = 0, .y = 0, .width = window->width, .height = TOP_BAR_HEIGHT
+	};
+	drawRectangleRect(topBar.boundary, 0x999999);
 
 	struct timespec requestedTime = { .tv_sec = 0, .tv_nsec = 16666667 };
 	struct timespec remainingTime;
