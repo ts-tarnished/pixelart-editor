@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 #define JUST_PIXELS_IMPLEMENTATION
 #include "just_pixels.h"
@@ -32,6 +33,8 @@ typedef struct {
 	int zoom;
 	Rectangle collider;
 	uint32_t activeColor;
+	int prevX;
+	int prevY;
 } EditorCanvas;
 
 typedef struct {
@@ -70,7 +73,9 @@ EditorCanvas createEditorCanvas() {
 		.collider = collider,
 			.capacity = capacity,
 			.pixels = canvasPixels,
-			.zoom = CANVAS_INITIAL_ZOOM
+			.zoom = CANVAS_INITIAL_ZOOM,
+			.prevX = -1,
+			.prevY = -1
 	};
 }
 
@@ -221,11 +226,71 @@ void drawEditorCanvas() {
 	}
 }
 
+void swapPoints(int *x0, int *y0, int *x1, int *y1) {
+	int temp = *x0;
+	*x0 = *x1;
+	*x1 = temp;
+	temp = *y0;
+	*y0 = *y1;
+	*y1 = temp;
+}
+
+void drawLine(int x0, int y0, int x1, int y1, uint32_t color) {
+	if (abs(x1 - x0) >= abs(y1 - y0)) {
+		if (x1 < x0) swapPoints(&x0, &y0, &x1, &y1);
+		float slope = (x1-x0 == 0) ? 0 : (float)(y1 - y0) / (float)(x1 - x0);
+		for (int x = 0; x <= (x1-x0); x++) {
+			setEditorCanvasPixel(x0 + x, y0 + roundf(x*slope), color);
+		}
+	} else {
+		if (y1 < y0) swapPoints(&x0, &y0, &x1, &y1);
+		float slope = (y1-y0 == 0) ? 0 : (float)(x1 - x0) / (float)(y1 - y0);
+		for (int y = 0; y <= (y1-y0); y++) {
+			setEditorCanvasPixel(x0 + roundf(y*slope), y0 + y, color);
+		}
+	}
+}
+
+void drawCoordinates() {
+	int h = 30;
+	for (int y = window->height - h; y < window->height; y++) {
+		for (int x = 0; x < window->width; x++) {
+			window->frameBuffer[x + y*window->width] = 0xFFFFFF;
+		}
+	}
+
+	char text[32];
+	int canvasX = (window->mouseX - CANVAS_OFFSET_X) / editorCanvas.zoom;
+	int canvasY = (window->mouseY - CANVAS_OFFSET_Y) / editorCanvas.zoom;
+	sprintf(text, "x:%i y:%i", canvasX, canvasY);
+	Jup_DrawText(window, 10, window->height - 19, text, 0);
+}
+
 void onLeftMouseDown() {
 	int canvasX = (window->mouseX - CANVAS_OFFSET_X) / editorCanvas.zoom;
 	int canvasY = (window->mouseY - CANVAS_OFFSET_Y) / editorCanvas.zoom;
-	setEditorCanvasPixel(canvasX, canvasY, editorCanvas.activeColor);
+	if (!inRectangle(canvasX, canvasY, editorCanvas.collider)) {
+		return;
+	}
+
+	if (editorCanvas.prevX < 0 || editorCanvas.prevY < 0) {
+		setEditorCanvasPixel(canvasX, canvasY, editorCanvas.activeColor);
+		editorCanvas.prevX = canvasX; editorCanvas.prevY = canvasY;
+		drawEditorCanvas();
+		return;
+	}
+
+	drawLine(editorCanvas.prevX, editorCanvas.prevY, canvasX, canvasY, editorCanvas.activeColor);
+	editorCanvas.prevX = canvasX; editorCanvas.prevY = canvasY;
 	drawEditorCanvas();
+}
+
+void onMouseRelease(float, float, int mouseButton) {
+	if (mouseButton != 1) {
+		return;
+	}
+
+	editorCanvas.prevX = -1; editorCanvas.prevY = -1;
 }
 
 int main (int argc, char *argv[]) {
@@ -239,7 +304,8 @@ int main (int argc, char *argv[]) {
 		.height = INITIAL_WINDOW_HEIGHT,
 		.windowTitle = "Pixelart Editor",
 		.frameBuffer = frameBuffer,
-		.onClick = onWindowClick
+		.onClick = onWindowClick,
+		.onMouseRelease = onMouseRelease
 	};
 	window = Jup_CreateWindow(create_window_args);
 
@@ -282,7 +348,9 @@ int main (int argc, char *argv[]) {
 		if (window->mouseDown[1]) {
 			onLeftMouseDown();
 		}
+		drawCoordinates();
 		Jup_DrawPixels(window);
+
 		nanosleep(&requestedTime, &remainingTime);
 	}
 
