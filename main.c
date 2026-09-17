@@ -78,6 +78,11 @@ static Palette palette;
 static TopBar topBar;
 static UIWidget toolsWidget;
 
+void drawLine(uint32_t *frameBuffer, int x0, int y0, int x1, int y1, uint32_t color);
+void setEditorCanvasPixel(uint32_t *frameBuffer, int x, int y, uint32_t color);
+bool getPixel(uint32_t *pixels, int x, int y, uint32_t *color);
+void drawEditorCanvas(void);
+
 bool inRectangle(int x, int y, Rectangle rectangle) {
 	if (x > rectangle.x + rectangle.width ||
 			y > rectangle.y + rectangle.height ||
@@ -123,12 +128,67 @@ void lineToolOnMouseDown(int x, int y) {
 }
 
 void lineToolOnMouseRelease(int x, int y) {
+	if (editorCanvas.prevX < 0 || editorCanvas.prevY < 0) return;
 	drawLine(editorCanvas.pixels, editorCanvas.prevX, editorCanvas.prevY, editorCanvas.endX, editorCanvas.endY, editorCanvas.activeColor);
 	for (int i = 0; i < editorCanvas.collider.width * editorCanvas.collider.height; i++) {
 		editorCanvas.toolLayer[i] = 0;
 	}
 	editorCanvas.prevX = -1; editorCanvas.prevY = -1;
 
+}
+
+void floodFillSelect(uint32_t *frameBuffer, Rectangle dimensions, int x, int y, uint32_t color, bool *selection, size_t *selectionLength) {
+	if (x < 0 || x >= dimensions.width || y < 0 || y >= dimensions.height)
+		return;
+
+	int index = x + y * dimensions.width;
+	if (selection[index])
+		return;
+
+	uint32_t c;
+	bool success = getPixel(frameBuffer, x, y, &c);
+	if (!success)
+		return;
+	if (c != color)
+		return;
+
+	selection[index] = true;
+	*selectionLength = *selectionLength + 1;
+	floodFillSelect(frameBuffer, dimensions, x-1, y, color, selection, selectionLength);
+	floodFillSelect(frameBuffer, dimensions, x+1, y, color, selection, selectionLength);
+	floodFillSelect(frameBuffer, dimensions, x, y+1, color, selection, selectionLength);
+	floodFillSelect(frameBuffer, dimensions, x, y-1, color, selection, selectionLength);
+}
+
+void fillToolOnMouseDown(int x, int y) {
+	if (editorCanvas.prevX >= 0 || editorCanvas.prevY >= 0) return;
+	editorCanvas.prevX = x;
+	editorCanvas.prevY = y;
+	bool *selection = calloc(editorCanvas.collider.width * editorCanvas.collider.height, sizeof(bool));
+	if (selection == NULL) {
+		fprintf(stderr, "Failed to allocate memory.\n");
+		exit(1);
+	}
+	size_t selectionLength = 0;
+	uint32_t color;
+	bool success = getPixel(editorCanvas.pixels, x, y, &color);
+	if (!success) return;
+
+	floodFillSelect(editorCanvas.pixels, editorCanvas.collider, x, y, color, selection, &selectionLength);
+	
+	for (int i = 0; i < editorCanvas.collider.width * editorCanvas.collider.height; i++) {
+		if (selection[i]) {
+			editorCanvas.pixels[i] = editorCanvas.activeColor;
+		}
+	}
+
+	free(selection);
+	drawEditorCanvas();
+}
+
+void fillToolOnMouseRelease() {
+	editorCanvas.prevX = -1;
+	editorCanvas.prevY = -1;
 }
 
 void selectPenTool() {
@@ -139,6 +199,11 @@ void selectPenTool() {
 void selectLineTool() {
 	editorCanvas.drawToolOnMouseDown = lineToolOnMouseDown;
 	editorCanvas.drawToolOnMouseRelease = lineToolOnMouseRelease;
+}
+
+void selectFillTool() {
+	editorCanvas.drawToolOnMouseDown = fillToolOnMouseDown;
+	editorCanvas.drawToolOnMouseRelease = fillToolOnMouseRelease;
 }
 
 EditorCanvas createEditorCanvas() {
@@ -346,7 +411,8 @@ void createToolsWidget() {
 	int buttonSize = 40;
 	int padding = 10;
 
-	for (int i = 0; i < 2; i++) {
+	toolsWidget.buttonCount = 3;
+	for (int i = 0; i < toolsWidget.buttonCount; i++) {
 		Rectangle collider = {
 			.x = padding,
 			.y = padding + TOP_WIDGET_HEIGHT + i*padding + i*buttonSize,
@@ -362,6 +428,8 @@ void createToolsWidget() {
 	toolsWidget.buttons[0].onClick = selectPenTool;
 	sprintf(toolsWidget.buttons[1].title, "Line");
 	toolsWidget.buttons[1].onClick = selectLineTool;
+	sprintf(toolsWidget.buttons[2].title, "Fill");
+	toolsWidget.buttons[2].onClick = selectFillTool;
 
 	toolsWidget.collider = (Rectangle) {
 		.x = 0,
@@ -369,8 +437,6 @@ void createToolsWidget() {
 		.width = width,
 		.height = window->height - TOP_WIDGET_HEIGHT - BOTTOM_WIDGET_HEIGHT,
 	};
-
-	toolsWidget.buttonCount = 2;
 }
 
 void drawToolsWidget() {
@@ -440,6 +506,7 @@ void onMouseRelease(float x, float y, int mouseButton) {
 	int canvasX = (window->mouseX - CANVAS_OFFSET_X) / editorCanvas.zoom;
 	int canvasY = (window->mouseY - CANVAS_OFFSET_Y) / editorCanvas.zoom;
 	editorCanvas.drawToolOnMouseRelease(canvasX, canvasY);
+	editorCanvas.prevX = -1; editorCanvas.prevY = -1;
 }
 
 int main (int argc, char *argv[]) {
