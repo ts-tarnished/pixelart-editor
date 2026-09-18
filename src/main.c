@@ -2,12 +2,15 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/types.h>
 #include <time.h>
 #include <math.h>
 #include <inttypes.h>
 
 #define JUST_PIXELS_IMPLEMENTATION
 #include "just_pixels.h"
+#include "util.h"
+#include "drawing_tools.h"
 
 #define INITIAL_WINDOW_WIDTH 1600
 #define INITIAL_WINDOW_HEIGHT 900
@@ -21,82 +24,41 @@
 #define CANVAS_OFFSET_Y 80
 
 #define TOP_WIDGET_HEIGHT 50
+#define TOOLS_WIDGET_WIDTH 60
 #define BOTTOM_WIDGET_HEIGHT 30
+#define PALETTE_WIDGET_WIDTH 200
 
 #define THEME_BG_COLOR 0x222222
+#define THEME_CLEAR_COLOR 0xCCCCCC
 #define THEME_FONT_COLOR 0xFFFFFF
 
-typedef struct {
-	int x;
-	int y;
-	int width;
-	int height;
-} Rectangle;
-
-typedef struct {
-	int capacity;
-	uint32_t *pixels;
-	uint32_t *toolLayer;
-	int zoom;
-	Rectangle collider;
-	uint32_t activeColor;
-	int mouseX;
-	int mouseY;
-	int prevX;
-	int prevY;
-	int endX;
-	int endY;
-	void (*drawToolOnMouseDown)(int x, int y);
-	void (*drawToolOnMouseRelease)(int x, int y);
-} EditorCanvas;
-
-typedef struct {
-	uint32_t colors[8];
-	Rectangle btnColliders[8];
-	Rectangle boundary;
-} Palette;
-
-typedef struct {
-	Rectangle boundary;
-} TopBar;
-
-typedef struct {
-	char title[16];
-	Rectangle collider;
-	void (*onClick)(void);
-} Button;
-
-typedef struct {
-	Rectangle collider;
-	size_t buttonCount;
-	Button buttons[32];
-} UIWidget;
-
 static Jup_Window *window;
+static PixelArray windowPixelArray;
 static EditorCanvas editorCanvas;
 static Palette palette;
 static TopBar topBar;
 static UIWidget toolsWidget;
 
-void drawLine(uint32_t *frameBuffer, int x0, int y0, int x1, int y1, uint32_t color);
-void setEditorCanvasPixel(uint32_t *frameBuffer, int x, int y, uint32_t color);
-bool getPixel(uint32_t *pixels, int x, int y, uint32_t *color);
-void drawEditorCanvas(void);
+void drawCanvas(void);
+void drawPaletteWidget(void);
 
-bool inRectangle(int x, int y, Rectangle rectangle) {
-	if (x > rectangle.x + rectangle.width ||
-			y > rectangle.y + rectangle.height ||
-			x < rectangle.x || y < rectangle.y) {
-		return false;
+/*
+void penToolOnMouseDown( int x, int y) {
+	if ((editorCanvas.prevX < 0 || editorCanvas.prevY < 0) && inRectangle(x, y, editorCanvas.collider)) {
+		// first point
+		setPixel(editorCanvas.pixels, x, y, editorCanvas.activeColor);
+		editorCanvas.prevX = x; editorCanvas.prevY = y;
+		return;
 	}
 
-	return true;
-}
-
-void penToolOnMouseDown( int x, int y) {
-	if (editorCanvas.prevX < 0 || editorCanvas.prevY < 0) {
-		setEditorCanvasPixel(editorCanvas.pixels, x, y, editorCanvas.activeColor);
-		editorCanvas.prevX = x; editorCanvas.prevY = y;
+	if (!inRectangle(x, y, editorCanvas.collider)) {
+		// drew outside
+		int _x;
+		if (x >= editorCanvas.collider.width) _x = editorCanvas.collider.width;
+		if (x < 0) _x = 0;
+		if (y >= editorCanvas.collider.
+		drawLine(editorCanvas.pixels, editorCanvas.prevX, editorCanvas.prevY, x, y, editorCanvas.activeColor);
+		editorCanvas.prevX = -1; editorCanvas.prevY = -1;
 		return;
 	}
 
@@ -111,8 +73,12 @@ void penToolOnMouseRelease(int, int) {
 
 void lineToolOnMouseDown(int x, int y) {
 	if (!inRectangle(x, y, editorCanvas.collider)) {
+		drawLine(editorCanvas.toolLayer, editorCanvas.prevX, editorCanvas.prevY, x, y, 0xFFFFFFFF);
+		editorCanvas.prevX = -1;
+		editorCanvas.prevY = -1;
 		return;
 	}
+
 	if (editorCanvas.prevX < 0 || editorCanvas.prevY < 0) {
 		editorCanvas.prevX = x; editorCanvas.prevY = y;
 		return;
@@ -175,7 +141,7 @@ void fillToolOnMouseDown(int x, int y) {
 	if (!success) return;
 
 	floodFillSelect(editorCanvas.pixels, editorCanvas.collider, x, y, color, selection, &selectionLength);
-	
+
 	for (int i = 0; i < editorCanvas.collider.width * editorCanvas.collider.height; i++) {
 		if (selection[i]) {
 			editorCanvas.pixels[i] = editorCanvas.activeColor;
@@ -183,42 +149,38 @@ void fillToolOnMouseDown(int x, int y) {
 	}
 
 	free(selection);
-	drawEditorCanvas();
 }
 
 void fillToolOnMouseRelease() {
 	editorCanvas.prevX = -1;
 	editorCanvas.prevY = -1;
-}
+} */
 
 void selectPenTool() {
-	editorCanvas.drawToolOnMouseDown = penToolOnMouseDown;
-	editorCanvas.drawToolOnMouseRelease = penToolOnMouseRelease;
+	setDrawingTool(DRAWING_TOOL_PEN);
 }
 
 void selectLineTool() {
-	editorCanvas.drawToolOnMouseDown = lineToolOnMouseDown;
-	editorCanvas.drawToolOnMouseRelease = lineToolOnMouseRelease;
+	setDrawingTool(DRAWING_TOOL_LINE);
 }
 
 void selectFillTool() {
-	editorCanvas.drawToolOnMouseDown = fillToolOnMouseDown;
-	editorCanvas.drawToolOnMouseRelease = fillToolOnMouseRelease;
+	setDrawingTool(DRAWING_TOOL_FILL);
 }
 
 EditorCanvas createEditorCanvas() {
 	int capacity = CANVAS_INITIAL_WIDTH * CANVAS_INITIAL_HEIGHT;
-	uint32_t *canvasPixels = malloc(capacity * sizeof(uint32_t));
-	if (canvasPixels == NULL) {
+	uint32_t *canvasPixelData = (uint32_t*)malloc(capacity * sizeof(uint32_t));
+	if (canvasPixelData == NULL) {
 		fprintf(stderr, "Error: Failed to allocate memory\n.");
 		exit(1);
 	}
 	for (int i = 0; i < capacity; i++) {
-		canvasPixels[i] = 0xFFFFFF;
+		canvasPixelData[i] = 0xFFFFFF;
 	}
 
-	uint32_t *toolLayer = calloc(capacity, sizeof(uint32_t));
-	if (toolLayer == NULL) {
+	uint32_t *toolLayerPixelData = (uint32_t*)calloc(capacity, sizeof(uint32_t));
+	if (toolLayerPixelData == NULL) {
 		fprintf(stderr, "Error: Failed to allocate memory.\n");
 		exit(1);
 	}
@@ -230,54 +192,32 @@ EditorCanvas createEditorCanvas() {
 		.height = CANVAS_INITIAL_HEIGHT,
 	};
 
+	PixelArray workLayer = (PixelArray) {
+		.width = CANVAS_INITIAL_WIDTH,
+		.height = CANVAS_INITIAL_HEIGHT,
+		.data = canvasPixelData
+	};
+
+	PixelArray toolLayer = (PixelArray) {
+		.width = CANVAS_INITIAL_WIDTH,
+		.height = CANVAS_INITIAL_HEIGHT,
+		.data = toolLayerPixelData
+	};
+
 	return (EditorCanvas) {
-		.collider = collider,
-			.capacity = capacity,
-			.pixels = canvasPixels,
+	        .capacity = capacity,
+			.workLayer = workLayer,
 			.toolLayer = toolLayer,
 			.zoom = CANVAS_INITIAL_ZOOM,
+			.collider = collider,
 			.mouseX = -1,
 			.mouseY = -1,
-			.prevX = -1,
-			.prevY = -1,
-			.drawToolOnMouseDown = lineToolOnMouseDown,
-			.drawToolOnMouseRelease = lineToolOnMouseRelease
 	};
 }
 
 void freeEditorCanvas(EditorCanvas editorCanvas) {
-	free(editorCanvas.pixels);
-}
-
-bool getPixel(uint32_t *pixels, int x, int y, uint32_t *color) {
-	if (x > editorCanvas.collider.width || x < 0 || y > editorCanvas.collider.height || y < 0) {
-		return false;
-	}
-	*color = pixels[x + y * editorCanvas.collider.width];
-	return true;
-}
-
-void setEditorCanvasPixel(uint32_t *frameBuffer, int x, int y, uint32_t color) {
-	if (x >= editorCanvas.collider.width || y >= editorCanvas.collider.height || x < 0 || y < 0)
-		return;
-	frameBuffer[x + y * editorCanvas.collider.width] = color;
-}
-
-void drawRectangle(uint32_t *frameBuffer, int x, int y, int width, int height, uint32_t color) {
-	// TODO: out of bounds check
-	for (int _y = y; _y < y + height; _y++) {
-		for (int _x = x; _x < x + width; _x++) {
-			frameBuffer[_x + _y * window->width] = color;
-		}
-	}
-}
-
-void drawRectangleRect(uint32_t *frameBuffer, Rectangle rectangle, uint32_t color) {
-	for (int y = rectangle.y; y < rectangle.y + rectangle.height; y++) {
-		for (int x = rectangle.x; x < rectangle.x + rectangle.width; x++) {
-			frameBuffer[x + y * window->width] = color;
-		}
-	}
+	free(editorCanvas.toolLayer.data);
+	free(editorCanvas.workLayer.data);
 }
 
 void loadImage(char *filePath) {
@@ -309,20 +249,20 @@ void loadImage(char *filePath) {
 	editorCanvas.collider.width = width;
 	editorCanvas.collider.height = height;
 
-	uint32_t *newPointer = realloc(editorCanvas.pixels, width * height * sizeof(uint32_t));
+	uint32_t *newPointer = (uint32_t*) realloc(editorCanvas.workLayer.data, width * height * sizeof(uint32_t));
 	if (newPointer == NULL) {
 		fprintf(stderr, "Error: Failed to allocate memory.\n");
 		fclose(file);
 		exit(1);
 	}
-	editorCanvas.pixels = newPointer;
+	editorCanvas.workLayer.data = newPointer;
 	while (getc(file) != '\n');
 	while (getc(file) != '\n');
 	for (int i = 0; i < width * height; i++) {
 		unsigned char rgb[3];
 		fread(&rgb, 1, 3, file);
 		uint32_t color = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
-		editorCanvas.pixels[i] = color;
+		editorCanvas.workLayer.data[i] = color;
 
 	}
 
@@ -335,19 +275,29 @@ void savePpm() {
 		fprintf(stderr, "Error: Failed to open image file.\n");
 		exit(1);
 	};
-	
+
 	fprintf(file, "P6\n%i %i\n255\n", editorCanvas.collider.width, editorCanvas.collider.height);
 	for (int i = 0; i < editorCanvas.capacity; i++) {
 		unsigned char color[3];
-            	color[0] = (editorCanvas.pixels[i] & 0xFF0000) >> 16;
-            	color[1] = (editorCanvas.pixels[i] & 0x00FF00) >> 8;
-            	color[2] = (editorCanvas.pixels[i] & 0x0000FF) >> 0;
+            	color[0] = (editorCanvas.workLayer.data[i] & 0xFF0000) >> 16;
+            	color[1] = (editorCanvas.workLayer.data[i] & 0x00FF00) >> 8;
+            	color[2] = (editorCanvas.workLayer.data[i] & 0x0000FF) >> 0;
 		fwrite(color, 1, 3, file);
 	}
 	fclose(file);
 }
 
-void onWindowClick(float x, float y, int mouse_btn) {
+void onMouseClick(float x, float y, int mouse_btn) {
+	if (mouse_btn == 4) {
+		editorCanvas.zoom ++;
+		return;
+	}
+
+	if (mouse_btn == 5) {
+		editorCanvas.zoom --;
+		return;
+	}
+
 	if (mouse_btn != 1) {
 		return;
 	}
@@ -357,7 +307,7 @@ void onWindowClick(float x, float y, int mouse_btn) {
 	}
 
 	if (inRectangle(x, y, toolsWidget.collider)) {
-		for (int i = 0; i < toolsWidget.buttonCount; i++) {
+		for (size_t i = 0; i < toolsWidget.buttonCount; i++) {
 			if (inRectangle(x, y, toolsWidget.buttons[i].collider)) {
 				toolsWidget.buttons[i].onClick();
 			}
@@ -367,36 +317,49 @@ void onWindowClick(float x, float y, int mouse_btn) {
 	for (int i = 0; i < 8; i++) {
 		if (inRectangle(x, y, palette.btnColliders[i])) {
 			editorCanvas.activeColor = palette.colors[i];
+			drawPaletteWidget();
 		}
 	}
-	
 }
 
-void drawEditorCanvas() {
+void drawCanvas() {
+	int minY = TOP_WIDGET_HEIGHT, maxY = window->height - BOTTOM_WIDGET_HEIGHT;
+	int minX = TOOLS_WIDGET_WIDTH, maxX = window->width - PALETTE_WIDGET_WIDTH - 1;
+
+	drawRectangle(&windowPixelArray, minX, minY, maxX-minX, maxY-minY, THEME_CLEAR_COLOR);
+
 	for (int y = 0; y < editorCanvas.collider.height; y++) {
+		int convertedY = y*editorCanvas.zoom + CANVAS_OFFSET_Y;
+		if (convertedY < minY || convertedY + editorCanvas.zoom > maxY)
+			continue;
+
 		for (int x = 0; x < editorCanvas.collider.width; x++) {
 			uint32_t color, colorToolLayer;
-			bool success = getPixel(editorCanvas.toolLayer, x, y, &colorToolLayer);
+			bool success = getPixel(&editorCanvas.toolLayer, x, y, &colorToolLayer);
 			if (!success) {
 				fprintf(stderr, "Error: Pixel out of bounds.\n");
 				exit(1);
 			}
-			success = getPixel(editorCanvas.pixels, x, y, &color);
+			success = getPixel(&editorCanvas.workLayer, x, y, &color);
 			if (!success) {
 				fprintf(stderr, "Error: Pixel out of bounds.\n");
 				exit(1);
 			}
 			uint8_t alpha = (colorToolLayer & 0xFF000000) >> 24;
+			int convertedX = x*editorCanvas.zoom + CANVAS_OFFSET_X;
+			if (convertedX < minX || convertedX + editorCanvas.zoom > maxX)
+				continue;
+
 			if (alpha > 0) {
 				drawRectangle(
-						window->frameBuffer,
+				        &windowPixelArray,
 						x*editorCanvas.zoom + CANVAS_OFFSET_X,
 						y*editorCanvas.zoom + CANVAS_OFFSET_Y,
 						editorCanvas.zoom,
 						editorCanvas.zoom, editorCanvas.activeColor);
 			} else {
 				drawRectangle(
-						window->frameBuffer,
+						&windowPixelArray,
 						x*editorCanvas.zoom + CANVAS_OFFSET_X,
 						y*editorCanvas.zoom + CANVAS_OFFSET_Y,
 						editorCanvas.zoom,
@@ -407,7 +370,6 @@ void drawEditorCanvas() {
 }
 
 void createToolsWidget() {
-	int width = 60;
 	int buttonSize = 40;
 	int padding = 10;
 
@@ -434,56 +396,55 @@ void createToolsWidget() {
 	toolsWidget.collider = (Rectangle) {
 		.x = 0,
 		.y = TOP_WIDGET_HEIGHT,
-		.width = width,
+		.width = TOOLS_WIDGET_WIDTH,
 		.height = window->height - TOP_WIDGET_HEIGHT - BOTTOM_WIDGET_HEIGHT,
 	};
 }
 
 void drawToolsWidget() {
-	drawRectangleRect(window->frameBuffer,
+	drawRectangleRect(&windowPixelArray,
 			toolsWidget.collider, THEME_BG_COLOR);
-	for (int i = 0; i < toolsWidget.buttonCount; i++) {
+	for (size_t i = 0; i < toolsWidget.buttonCount; i++) {
 		Button button = toolsWidget.buttons[i];
-		drawRectangleRect(window->frameBuffer, button.collider, 0);
+		drawRectangleRect(&windowPixelArray, button.collider, 0);
 		Jup_DrawText(window, button.collider.x + 4, button.collider.y + 4, button.title, THEME_FONT_COLOR);
 	}
 }
 
-void swapPoints(int *x0, int *y0, int *x1, int *y1) {
-	int temp = *x0;
-	*x0 = *x1;
-	*x1 = temp;
-	temp = *y0;
-	*y0 = *y1;
-	*y1 = temp;
-}
+void drawPaletteWidget() {
+	drawRectangle(&windowPixelArray,
+			window->width - PALETTE_WIDGET_WIDTH, TOP_WIDGET_HEIGHT,
+			PALETTE_WIDGET_WIDTH, window->height - TOP_WIDGET_HEIGHT - BOTTOM_WIDGET_HEIGHT,
+			THEME_BG_COLOR);
+	int w = 20, h = 20, gap = 4;
+	for (int i = 0; i < 8; i++) {
+		int x = window->width - (gap + w)*(i+1);
+		int y = TOP_WIDGET_HEIGHT + 2;
+		if (palette.colors[i] == editorCanvas.activeColor) {
+			drawRectangle(&windowPixelArray,
+				       	x-1, y-1, w+2, h+2, 0xFFFFFF);
+		}
+		palette.btnColliders[i] = (Rectangle) {
+			.x = x,
+				.y = TOP_WIDGET_HEIGHT + 1,
+				.width = w,
+				.height = h
+		};
 
-void drawLine(uint32_t *frameBuffer, int x0, int y0, int x1, int y1, uint32_t color) {
-	if (abs(x1 - x0) >= abs(y1 - y0)) {
-		if (x1 < x0) swapPoints(&x0, &y0, &x1, &y1);
-		float slope = (x1-x0 == 0) ? 0 : (float)(y1 - y0) / (float)(x1 - x0);
-		for (int x = 0; x <= (x1-x0); x++) {
-			setEditorCanvasPixel(frameBuffer, x0 + x, y0 + roundf(x*slope), color);
-		}
-	} else {
-		if (y1 < y0) swapPoints(&x0, &y0, &x1, &y1);
-		float slope = (y1-y0 == 0) ? 0 : (float)(x1 - x0) / (float)(y1 - y0);
-		for (int y = 0; y <= (y1-y0); y++) {
-			setEditorCanvasPixel(frameBuffer, x0 + roundf(y*slope), y0 + y, color);
-		}
+		drawRectangleRect(&windowPixelArray, palette.btnColliders[i], palette.colors[i]);
 	}
 }
 
 void drawCoordinates() {
 	char text[32];
 	sprintf(text, "x:%i y:%i", editorCanvas.mouseX, editorCanvas.mouseY);
-	drawRectangle(window->frameBuffer,
+	drawRectangle(&windowPixelArray,
 			0, window->height - BOTTOM_WIDGET_HEIGHT, 120, BOTTOM_WIDGET_HEIGHT, THEME_BG_COLOR);
 	Jup_DrawText(window, 10, window->height - 19, text, THEME_FONT_COLOR);
 }
 
 void drawBottomWidget() {
-	drawRectangle(window->frameBuffer,
+	drawRectangle(&windowPixelArray,
 			0, window->height - BOTTOM_WIDGET_HEIGHT, window->width, BOTTOM_WIDGET_HEIGHT, THEME_BG_COLOR);
 	drawCoordinates();
 }
@@ -491,45 +452,46 @@ void drawBottomWidget() {
 void onLeftMouseDown() {
 	int canvasX = (window->mouseX - CANVAS_OFFSET_X) / editorCanvas.zoom;
 	int canvasY = (window->mouseY - CANVAS_OFFSET_Y) / editorCanvas.zoom;
-	if (!inRectangle(canvasX, canvasY, editorCanvas.collider)) {
-		return;
-	}
 
-	editorCanvas.drawToolOnMouseDown(canvasX, canvasY);
-	drawEditorCanvas();
+	drawingToolOnMouseDown(canvasX, canvasY);
 }
 
-void onMouseRelease(float x, float y, int mouseButton) {
+void onMouseRelease(float, float, int mouseButton) {
 	if (mouseButton != 1) {
 		return;
 	}
 	int canvasX = (window->mouseX - CANVAS_OFFSET_X) / editorCanvas.zoom;
 	int canvasY = (window->mouseY - CANVAS_OFFSET_Y) / editorCanvas.zoom;
-	editorCanvas.drawToolOnMouseRelease(canvasX, canvasY);
-	editorCanvas.prevX = -1; editorCanvas.prevY = -1;
+
+	drawingToolOnMouseRelease(canvasX, canvasY);
 }
 
 int main (int argc, char *argv[]) {
-	uint32_t *frameBuffer = calloc(MAX_WIDTH*MAX_HEIGHT, sizeof(uint32_t));
-	for (int i = 0; i < MAX_WIDTH*MAX_HEIGHT; i++ ) {
-		frameBuffer[i] = 0xCCCCCC;
-	}
+	uint32_t *pixels = (uint32_t*)calloc(MAX_WIDTH*MAX_HEIGHT, sizeof(uint32_t));
 
 	Jup_CreateWindowArgs create_window_args = {
 		.width = INITIAL_WINDOW_WIDTH,
 		.height = INITIAL_WINDOW_HEIGHT,
 		.windowTitle = "Pixelart Editor",
-		.frameBuffer = frameBuffer,
-		.onClick = onWindowClick,
+		.frameBuffer = pixels,
+		.onClick = onMouseClick,
 		.onMouseRelease = onMouseRelease
 	};
 	window = Jup_CreateWindow(create_window_args);
+	windowPixelArray = (PixelArray) {
+	    .width = INITIAL_WINDOW_WIDTH,
+					.height = INITIAL_WINDOW_HEIGHT,
+					.data = pixels
+	};
 
 	editorCanvas = createEditorCanvas();
 	if (argc > 1) {
 		loadImage(argv[1]);
 	}
-	drawEditorCanvas();
+
+	topBar.boundary = (Rectangle) {
+		.x = 0, .y = 0, .width = window->width, .height = TOP_WIDGET_HEIGHT
+	};
 
 	palette.colors[0] = 0x000000;
 	palette.colors[1] = 0xFF0000;
@@ -541,23 +503,20 @@ int main (int argc, char *argv[]) {
 	palette.colors[7] = 0xFFFFFF;
 	editorCanvas.activeColor = 0x000000;
 
-	for (int i = 0; i < 8; i++) {
-		palette.btnColliders[i] = (Rectangle) {
-			.x = window->width - (4 + 20)*(i+1),
-				.y = TOP_WIDGET_HEIGHT,
-				.width = 20,
-				.height = 20
-		};
+	initializeDrawingTools(&editorCanvas);
+	setDrawingTool(DRAWING_TOOL_PEN);
 
-		drawRectangleRect(window->frameBuffer, palette.btnColliders[i], palette.colors[i]);
+	// full clear
+	for (int i = 0; i < MAX_WIDTH*MAX_HEIGHT; i++ ) {
+		pixels[i] = THEME_CLEAR_COLOR;
 	}
 
-	topBar.boundary = (Rectangle) {
-		.x = 0, .y = 0, .width = window->width, .height = TOP_WIDGET_HEIGHT
-	};
-	drawRectangleRect(window->frameBuffer, topBar.boundary, 0x999999);
-	drawBottomWidget();
+	drawRectangleRect(&windowPixelArray, topBar.boundary, 0x999999);
 	createToolsWidget();
+
+	drawBottomWidget();
+	drawToolsWidget();
+	drawPaletteWidget();
 
 	struct timespec requestedTime = { .tv_sec = 0, .tv_nsec = 16666667 };
 	struct timespec remainingTime;
@@ -577,7 +536,7 @@ int main (int argc, char *argv[]) {
 		editorCanvas.mouseY = convertedMouseY;
 
 		drawCoordinates();
-		drawToolsWidget();
+		drawCanvas();
 		Jup_DrawPixels(window);
 
 		nanosleep(&requestedTime, &remainingTime);

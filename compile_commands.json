@@ -1,0 +1,7 @@
+[
+  {
+    "directory": ".",
+    "command": "/usr/bin/g++ -Iinclude -std=c++17 -c src/main.cpp",
+    "file": "/path/to/src/main.cpp"
+  }
+]
