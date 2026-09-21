@@ -1,45 +1,10 @@
-#ifndef JUST_PIXELS_H
-#define JUST_PIXELS_H
-
-#include <stdbool.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <stdint.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
+#include <math.h>
+#include <string.h>
+#include "ts_sw_graphics.h"
 
-#define JUP_MOUSE_BUTTONS_CAPACITY 32
-
-typedef struct {
-	Display *display;
-	Window window;
-	XImage *frameBufferImage;
-	Atom deleteWindowMessage;
-	GC graphicsContext;
-} Jup_X11Context;
-
-typedef struct {
-	int width;
-	int height;
-	float mouseX;
-	float mouseY;
-	bool mouseDown[JUP_MOUSE_BUTTONS_CAPACITY];
-	uint32_t *frameBuffer;
-	void (*onClick)(float x, float y, int mouseBtn);
-	void (*onMouseRelease)(float x, float y, int mouseBtn);
-	Jup_X11Context context;
-} Jup_Window;
-
-typedef struct {
-	int width;
-	int height;
-	char *windowTitle;
-	uint32_t *frameBuffer;
-	void (*onClick)(float x, float y, int mouseBtn);
-	void (*onMouseRelease)(float x, float y, int mouseBtn);
-} Jup_CreateWindowArgs;
-
-// taken from https://github.com/nakst/luigi
+// For displaying text, taken from https://github.com/nakst/luigi
 const uint64_t glyphs[] = {
 	0x0000000000000000UL, 0x0000000000000000UL, 0xBD8181A5817E0000UL, 0x000000007E818199UL, 0xC3FFFFDBFF7E0000UL, 0x000000007EFFFFE7UL, 0x7F7F7F3600000000UL, 0x00000000081C3E7FUL,
 	0x7F3E1C0800000000UL, 0x0000000000081C3EUL, 0xE7E73C3C18000000UL, 0x000000003C1818E7UL, 0xFFFF7E3C18000000UL, 0x000000003C18187EUL, 0x3C18000000000000UL, 0x000000000000183CUL,
@@ -75,217 +40,112 @@ const uint64_t glyphs[] = {
 	0x1800181818180000UL, 0x0000000018181818UL, 0x18701818180E0000UL, 0x000000000E181818UL, 0x000000003B6E0000UL, 0x0000000000000000UL, 0x63361C0800000000UL, 0x00000000007F6363UL,
 };
 
+void swapPoints(int *x0, int *y0, int *x1, int *y1) {
+	int temp = *x0;
+	*x0 = *x1;
+	*x1 = temp;
+	temp = *y0;
+	*y0 = *y1;
+	*y1 = temp;
+}
 
-Jup_Window* Jup_CreateWindow(Jup_CreateWindowArgs args);
-bool Jup_WindowShouldClose(Jup_Window *jupWindow);
-void Jup_Update(Jup_Window *jupWindow, int x, int y, int width, int height);
-void Jup_DrawPixels(Jup_Window *jupWindow);
-void Jup_FreeAndClose(Jup_Window *window);
-
-#define JUST_PIXELS_IMPLEMENTATION
-#ifdef JUST_PIXELS_IMPLEMENTATION
-
-Jup_X11Context Jup_X11_Init(Jup_CreateWindowArgs args) {
-	Display *display = XOpenDisplay(NULL);
-	if (display == NULL) {
-		exit(1);
+bool inRectangle(int x, int y, Rectangle rectangle) {
+	if (x >= rectangle.x + rectangle.width ||
+			y >= rectangle.y + rectangle.height ||
+			x < rectangle.x || y < rectangle.y) {
+		return false;
 	}
 
-	int screen = DefaultScreen(display);
-	Window window = XCreateSimpleWindow(
-			display,
-			RootWindow(display, screen),
-			100, 100,
-			args.width,
-			args.height,
-			0,
-			BlackPixel(display, screen),
-			BlackPixel(display, screen)
-			);
-
-	XSelectInput(display,
-			window,
-			PointerMotionMask |
-			ButtonPressMask |
-			ButtonReleaseMask |
-			ExposureMask |
-			StructureNotifyMask);
-
-	XStoreName(display, window, args.windowTitle);
-
-	Atom deleteWindowMessage =
-		XInternAtom(display, "WM_DELETE_WINDOW", False);
-
-	XSetWMProtocols(
-			display,
-			window,
-			&deleteWindowMessage,
-			1
-		       );
-
-	XMapWindow(display, window);
-
-	XImage *frameBufferImage = XCreateImage(
-			display,
-			DefaultVisual(display, screen),
-			24,
-			ZPixmap,
-			0,
-			(char *)args.frameBuffer,
-			args.width,
-			args.height,
-			32,
-			args.width * sizeof(uint32_t)
-			);
-
-	GC graphicsContext = DefaultGC(display, screen);
-
-	Jup_X11Context x11 = (Jup_X11Context) {
-		.display = display,
-			.window = window,
-			.frameBufferImage = frameBufferImage,
-			.deleteWindowMessage = deleteWindowMessage,
-			.graphicsContext = graphicsContext
-	};
-
-	return x11;
+	return true;
 }
 
-Jup_Window* Jup_CreateWindow(Jup_CreateWindowArgs args) {
-	Jup_Window *window = (Jup_Window*)malloc(sizeof(Jup_Window));
-	window->width = args.width;
-	window->height = args.height;
-	window->context = Jup_X11_Init(args);
-	window->onClick = args.onClick;
-	window->onMouseRelease = args.onMouseRelease;
-	window->frameBuffer = args.frameBuffer;
-	window->mouseX = 9999;
-	window->mouseY = 9999;
-	for (int i = 0; i < JUP_MOUSE_BUTTONS_CAPACITY; i++) {
-		window->mouseDown[i] = false;
+void drawRectangle(PixelArray *pixels, int x, int y, int width, int height, uint32_t color) {
+	// TODO: out of bounds check
+	for (int _y = y; _y < y + height; _y++) {
+		for (int _x = x; _x < x + width; _x++) {
+			pixels->data[_x + _y * pixels->width] = color;
+		}
 	}
-
-	return window;
 }
 
-bool Jup_WindowShouldClose(Jup_Window *jupWindow) {
-	Jup_X11Context x11 = jupWindow->context;
-	XEvent event;
-
-	while (XPending(x11.display) > 0) {
-		XNextEvent(x11.display, &event);
-		if (event.type == ClientMessage &&
-				(Atom)event.xclient.data.l[0] == x11.deleteWindowMessage) {
-			return 1;
+void drawRectangleRec(PixelArray *pixels, Rectangle rectangle, uint32_t color) {
+	for (int y = rectangle.y; y < rectangle.y + rectangle.height; y++) {
+		for (int x = rectangle.x; x < rectangle.x + rectangle.width; x++) {
+			pixels->data[x + y * pixels->width] = color;
 		}
-
-		if (event.type == MotionNotify) {
-			XMotionEvent *motion = &event.xmotion;
-			jupWindow->mouseX = motion->x;
-			jupWindow->mouseY = motion->y;
-		}
-
-		if (event.type == ButtonPress) {
-			if (event.xbutton.button >= JUP_MOUSE_BUTTONS_CAPACITY) {
-				fprintf(stderr, "Error: Unknown mouse button: %i\n", event.xbutton.button);
-			}
-
-			jupWindow->mouseDown[event.xbutton.button] = true;
-			jupWindow->onClick(
-					event.xbutton.x,
-					event.xbutton.y,
-					event.xbutton.button
-					);
-		}
-
-		if (event.type == ButtonRelease) {
-			if (event.xbutton.button >= JUP_MOUSE_BUTTONS_CAPACITY) {
-				fprintf(stderr, "Error: Unknown mouse button: %i\n", event.xbutton.button);
-			}
-
-			jupWindow->mouseDown[event.xbutton.button] = false;
-			jupWindow->onMouseRelease(
-					event.xbutton.x,
-					event.xbutton.y,
-					event.xbutton.button
-					);
-		}
-
 	}
-
-	return 0;
 }
 
-void Jup_X11Update(Jup_Window *jup_window, int x, int y, int width, int height) {
-	Jup_X11Context x11 = jup_window->context;
-	XPutImage(
-			x11.display,
-			x11.window,
-			x11.graphicsContext,
-			x11.frameBufferImage,
-			x, y,
-			x, y,
-			width,height // update region
-		 );
-	XFlush(x11.display);
+void drawRectangleRecBordered(PixelArray *pixels, Rectangle rectangle, unsigned int borderWidth, uint32_t recColor, uint32_t borderColor) {
+    if (borderWidth > rectangle.width /  2 || borderWidth > rectangle.height / 2) {
+        drawRectangleRec(pixels, rectangle, borderColor);
+        return;
+    }
+
+    uint32_t color = 0;
+    for (int y = 0; y < rectangle.height; y++) {
+        for (int x = 0; x < rectangle.width; x++) {
+            if (y >= borderWidth && y < rectangle.height - borderWidth
+                && x >= borderWidth && x < rectangle.width - borderWidth) {
+                    color = recColor;
+            } else {
+                color = borderColor;
+            }
+
+            pixels->data[(rectangle.x + x) + (rectangle.y + y) * pixels->width] = color;
+        }
+    }
+}
+
+bool getPixel(PixelArray *pixels, int x, int y, uint32_t *color) {
+	if (x >= pixels->width || x < 0 || y >= pixels->height || y < 0) {
+		return false;
+	}
+	*color = pixels->data[x + y * pixels->width];
+	return true;
+}
+
+void setPixel(PixelArray *pixels, int x, int y, uint32_t color) {
+	if (x >= pixels->width || x < 0 || y >= pixels->height || y < 0) {
+		return;
+	}
+	pixels->data[x + y * pixels->width] = color;
+}
+
+void drawLine(PixelArray *pixels, int x0, int y0, int x1, int y1, uint32_t color) {
+	if (abs(x1 - x0) >= abs(y1 - y0)) {
+		if (x1 < x0) swapPoints(&x0, &y0, &x1, &y1);
+		float slope = (x1-x0 == 0) ? 0 : (float)(y1 - y0) / (float)(x1 - x0);
+		for (int x = 0; x <= (x1-x0); x++) {
+			setPixel(pixels, x0 + x, y0 + roundf(x*slope), color);
+		}
+	} else {
+		if (y1 < y0) swapPoints(&x0, &y0, &x1, &y1);
+		float slope = (y1-y0 == 0) ? 0 : (float)(x1 - x0) / (float)(y1 - y0);
+		for (int y = 0; y <= (y1-y0); y++) {
+			setPixel(pixels, x0 + roundf(y*slope), y0 + y, color);
+		}
+	}
 }
 
 
-void Jup_Update(Jup_Window *jup_window, int x, int y, int width, int height) {
-	Jup_X11Update(jup_window, x, y, width, height);
-}
-
-void Jup_X11DrawPixels(Jup_Window *jup_window) {
-	Jup_X11Context x11 = jup_window->context;
-	XPutImage(
-			x11.display,
-			x11.window,
-			x11.graphicsContext,
-			x11.frameBufferImage,
-			0, 0,
-			0, 0,
-			jup_window->width,
-			jup_window->height
-		 );
-	XFlush(x11.display);
-}
-
-void Jup_DrawPixels(Jup_Window *jup_window) {
-	Jup_X11DrawPixels(jup_window);
-}
-
-void Jup_X11FreeAndClose(Jup_Window * window) {
-	Jup_X11Context x11 = window->context;
-	// XDestroyImage also frees the frame_buffer that was passed in Jup_CreateWindow()
-	XDestroyImage(x11.frameBufferImage);
-	free(window);
-	XCloseDisplay(x11.display);
-}
-
-void Jup_FreeAndClose(Jup_Window *window) {
-	Jup_X11FreeAndClose(window);
-}
-
-void Jup_DrawGlyphPart(Jup_Window *jup_window, int x, int y, int i, uint32_t color) {
+void Jup_DrawGlyphPart(PixelArray *pixels, int x, int y, int i, uint32_t color) {
 		uint64_t glyph = glyphs[i];
 		for (int glyph_y = 0; glyph_y < 8; glyph_y ++) {
 			for (int glyph_x = 0; glyph_x < 8; glyph_x ++) {
 				int bit = glyph_x + glyph_y * 8;
 				if (glyph & (uint64_t)1 << bit) {
-					jup_window->frameBuffer[(x + glyph_x) + (y + glyph_y) * jup_window->width] = color;
+					pixels->data[(x + glyph_x) + (y + glyph_y) * pixels->width] = color;
 				}
 			}
 		}
 }
 
-void Jup_DrawText(Jup_Window *jup_window, int x, int y, char *text, uint32_t color) {
+void Jup_DrawText(PixelArray *pixels, int x, int y, char *text, uint32_t color) {
 	for (int i = 0; i < (int)strlen(text); i++) {
 		int c = (int)text[i];
 		if (c < 0 || c > 127) c = '?';
-		Jup_DrawGlyphPart(jup_window, x + i*8, y, c*2, color);
-		Jup_DrawGlyphPart(jup_window, x + i*8, y+8, c*2+1, color);
+		Jup_DrawGlyphPart(pixels, x + i*8, y, c*2, color);
+		Jup_DrawGlyphPart(pixels, x + i*8, y+8, c*2+1, color);
 	}
 }
-
-#endif
-#endif

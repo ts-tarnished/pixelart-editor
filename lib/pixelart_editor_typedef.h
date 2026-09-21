@@ -1,19 +1,8 @@
+#ifndef PIXELART_EDITOR_TYPEDEF
+#define PIXELART_EDITOR_TYPEDEF
+
 #include <stdbool.h>
-#include <stdint.h>
-#include <stddef.h>
-
-typedef struct {
-	int x;
-	int y;
-	int width;
-	int height;
-} Rectangle;
-
-typedef struct {
-	size_t width;
-	size_t height;
-	uint32_t *data;
-} PixelArray;
+#include "ts_sw_graphics.h"
 
 typedef struct {
 	int capacity;
@@ -40,12 +29,12 @@ typedef struct {
 	char title[16];
 	Rectangle collider;
 	void (*onClick)(void);
-} Button;
+} UIButton;
 
 typedef struct {
 	Rectangle collider;
-	size_t buttonCount;
-	Button buttons[32];
+	unsigned int buttonCount;
+	UIButton buttons[32];
 } UIWidget;
 
 bool inRectangle(int x, int y, Rectangle rectangle);
@@ -53,4 +42,7 @@ void drawLine(PixelArray *pixels, int x0, int y0, int x1, int y1, uint32_t color
 void setPixel(PixelArray *pixels, int x, int y, uint32_t color);
 bool getPixel(PixelArray *pixels, int x, int y, uint32_t *color);
 void drawRectangle(PixelArray *pixels, int x, int y, int width, int height, uint32_t color);
-void drawRectangleRect(PixelArray *pixels, Rectangle rectangle, uint32_t color);
+void drawRectangleRec(PixelArray *pixels, Rectangle rectangle, uint32_t color);
+void drawRectangleRecBordered(PixelArray *pixels, Rectangle rectangle, unsigned int borderWidth, uint32_t recColor, uint32_t borderColor);
+
+#endif

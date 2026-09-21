@@ -1,3 +1,5 @@
+#include "pixelart_editor_typedef.h"
+
 enum DrawingToolType { DRAWING_TOOL_PEN, DRAWING_TOOL_LINE, DRAWING_TOOL_FILL };
 
 void initializeDrawingTools(EditorCanvas *_editorCanvas);

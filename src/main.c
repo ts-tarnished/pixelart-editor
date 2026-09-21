@@ -7,10 +7,9 @@
 #include <math.h>
 #include <inttypes.h>
 
-#define JUST_PIXELS_IMPLEMENTATION
 #include "just_pixels.h"
-#include "util.h"
 #include "drawing_tools.h"
+#include "dialog.h"
 
 #define INITIAL_WINDOW_WIDTH 1600
 #define INITIAL_WINDOW_HEIGHT 900
@@ -36,125 +35,11 @@ static Jup_Window *window;
 static PixelArray windowPixelArray;
 static EditorCanvas editorCanvas;
 static Palette palette;
-static TopBar topBar;
+static UIWidget topWidget;
 static UIWidget toolsWidget;
 
 void drawCanvas(void);
 void drawPaletteWidget(void);
-
-/*
-void penToolOnMouseDown( int x, int y) {
-	if ((editorCanvas.prevX < 0 || editorCanvas.prevY < 0) && inRectangle(x, y, editorCanvas.collider)) {
-		// first point
-		setPixel(editorCanvas.pixels, x, y, editorCanvas.activeColor);
-		editorCanvas.prevX = x; editorCanvas.prevY = y;
-		return;
-	}
-
-	if (!inRectangle(x, y, editorCanvas.collider)) {
-		// drew outside
-		int _x;
-		if (x >= editorCanvas.collider.width) _x = editorCanvas.collider.width;
-		if (x < 0) _x = 0;
-		if (y >= editorCanvas.collider.
-		drawLine(editorCanvas.pixels, editorCanvas.prevX, editorCanvas.prevY, x, y, editorCanvas.activeColor);
-		editorCanvas.prevX = -1; editorCanvas.prevY = -1;
-		return;
-	}
-
-	drawLine(editorCanvas.pixels, editorCanvas.prevX, editorCanvas.prevY, x, y, editorCanvas.activeColor);
-	editorCanvas.prevX = x; editorCanvas.prevY = y;
-}
-
-void penToolOnMouseRelease(int, int) {
-	editorCanvas.prevX = -1;
-	editorCanvas.prevY = -1;
-}
-
-void lineToolOnMouseDown(int x, int y) {
-	if (!inRectangle(x, y, editorCanvas.collider)) {
-		drawLine(editorCanvas.toolLayer, editorCanvas.prevX, editorCanvas.prevY, x, y, 0xFFFFFFFF);
-		editorCanvas.prevX = -1;
-		editorCanvas.prevY = -1;
-		return;
-	}
-
-	if (editorCanvas.prevX < 0 || editorCanvas.prevY < 0) {
-		editorCanvas.prevX = x; editorCanvas.prevY = y;
-		return;
-	}
-
-	for (int i = 0; i < editorCanvas.collider.width * editorCanvas.collider.height; i++) {
-		editorCanvas.toolLayer[i] = 0;
-	}
-
-	drawLine(editorCanvas.toolLayer, editorCanvas.prevX, editorCanvas.prevY, x, y, 0xFFFFFFFF);
-	editorCanvas.endX = x;
-	editorCanvas.endY = y;
-}
-
-void lineToolOnMouseRelease(int x, int y) {
-	if (editorCanvas.prevX < 0 || editorCanvas.prevY < 0) return;
-	drawLine(editorCanvas.pixels, editorCanvas.prevX, editorCanvas.prevY, editorCanvas.endX, editorCanvas.endY, editorCanvas.activeColor);
-	for (int i = 0; i < editorCanvas.collider.width * editorCanvas.collider.height; i++) {
-		editorCanvas.toolLayer[i] = 0;
-	}
-	editorCanvas.prevX = -1; editorCanvas.prevY = -1;
-
-}
-
-void floodFillSelect(uint32_t *frameBuffer, Rectangle dimensions, int x, int y, uint32_t color, bool *selection, size_t *selectionLength) {
-	if (x < 0 || x >= dimensions.width || y < 0 || y >= dimensions.height)
-		return;
-
-	int index = x + y * dimensions.width;
-	if (selection[index])
-		return;
-
-	uint32_t c;
-	bool success = getPixel(frameBuffer, x, y, &c);
-	if (!success)
-		return;
-	if (c != color)
-		return;
-
-	selection[index] = true;
-	*selectionLength = *selectionLength + 1;
-	floodFillSelect(frameBuffer, dimensions, x-1, y, color, selection, selectionLength);
-	floodFillSelect(frameBuffer, dimensions, x+1, y, color, selection, selectionLength);
-	floodFillSelect(frameBuffer, dimensions, x, y+1, color, selection, selectionLength);
-	floodFillSelect(frameBuffer, dimensions, x, y-1, color, selection, selectionLength);
-}
-
-void fillToolOnMouseDown(int x, int y) {
-	if (editorCanvas.prevX >= 0 || editorCanvas.prevY >= 0) return;
-	editorCanvas.prevX = x;
-	editorCanvas.prevY = y;
-	bool *selection = calloc(editorCanvas.collider.width * editorCanvas.collider.height, sizeof(bool));
-	if (selection == NULL) {
-		fprintf(stderr, "Failed to allocate memory.\n");
-		exit(1);
-	}
-	size_t selectionLength = 0;
-	uint32_t color;
-	bool success = getPixel(editorCanvas.pixels, x, y, &color);
-	if (!success) return;
-
-	floodFillSelect(editorCanvas.pixels, editorCanvas.collider, x, y, color, selection, &selectionLength);
-
-	for (int i = 0; i < editorCanvas.collider.width * editorCanvas.collider.height; i++) {
-		if (selection[i]) {
-			editorCanvas.pixels[i] = editorCanvas.activeColor;
-		}
-	}
-
-	free(selection);
-}
-
-void fillToolOnMouseRelease() {
-	editorCanvas.prevX = -1;
-	editorCanvas.prevY = -1;
-} */
 
 void selectPenTool() {
 	setDrawingTool(DRAWING_TOOL_PEN);
@@ -302,8 +187,11 @@ void onMouseClick(float x, float y, int mouse_btn) {
 		return;
 	}
 
-	if (inRectangle(x, y, topBar.boundary)) {
-		savePpm();
+	for (int i = 0; i < topWidget.buttonCount; i ++) {
+	    if (inRectangle(x, y, topWidget.buttons[i].collider)) {
+					// TODO: show dialog
+					return;
+		}
 	}
 
 	if (inRectangle(x, y, toolsWidget.collider)) {
@@ -369,6 +257,42 @@ void drawCanvas() {
 	}
 }
 
+void createTopWidget() {
+    Rectangle collider = {
+        .x = 0,
+        .y = 0,
+        .width = window->width,
+        .height = TOP_WIDGET_HEIGHT
+    };
+
+
+    topWidget = (UIWidget) {
+        .collider = collider,
+        .buttonCount = 1,
+    };
+
+    int w = 30, h = 30;
+    for (int i = 0; i < topWidget.buttonCount; i ++) {
+        topWidget.buttons[0] = (UIButton) {
+            .collider = (Rectangle) {
+                .x = (i * w) + (4 * i),
+                .y = 4,
+                .width = w,
+                .height = h
+            },
+        };
+    }
+
+    strcpy(topWidget.buttons[0].title,"Resize");
+}
+
+void drawTopWidget() {
+    drawRectangleRec(&windowPixelArray, topWidget.collider, THEME_BG_COLOR);
+    for (int i = 0; i < topWidget.buttonCount; i++) {
+        drawRectangleRec(&windowPixelArray, topWidget.buttons[i].collider, 0);
+    }
+}
+
 void createToolsWidget() {
 	int buttonSize = 40;
 	int padding = 10;
@@ -381,7 +305,7 @@ void createToolsWidget() {
 			.width = buttonSize,
 			.height = buttonSize
 		};
-		toolsWidget.buttons[i] = (Button) {
+		toolsWidget.buttons[i] = (UIButton) {
 			.collider = collider
 		};
 	}
@@ -402,12 +326,12 @@ void createToolsWidget() {
 }
 
 void drawToolsWidget() {
-	drawRectangleRect(&windowPixelArray,
+	drawRectangleRec(&windowPixelArray,
 			toolsWidget.collider, THEME_BG_COLOR);
 	for (size_t i = 0; i < toolsWidget.buttonCount; i++) {
-		Button button = toolsWidget.buttons[i];
-		drawRectangleRect(&windowPixelArray, button.collider, 0);
-		Jup_DrawText(window, button.collider.x + 4, button.collider.y + 4, button.title, THEME_FONT_COLOR);
+		UIButton button = toolsWidget.buttons[i];
+		drawRectangleRec(&windowPixelArray, button.collider, 0);
+		Jup_DrawText(&windowPixelArray, button.collider.x + 4, button.collider.y + 4, button.title, THEME_FONT_COLOR);
 	}
 }
 
@@ -431,7 +355,7 @@ void drawPaletteWidget() {
 				.height = h
 		};
 
-		drawRectangleRect(&windowPixelArray, palette.btnColliders[i], palette.colors[i]);
+		drawRectangleRec(&windowPixelArray, palette.btnColliders[i], palette.colors[i]);
 	}
 }
 
@@ -440,13 +364,24 @@ void drawCoordinates() {
 	sprintf(text, "x:%i y:%i", editorCanvas.mouseX, editorCanvas.mouseY);
 	drawRectangle(&windowPixelArray,
 			0, window->height - BOTTOM_WIDGET_HEIGHT, 120, BOTTOM_WIDGET_HEIGHT, THEME_BG_COLOR);
-	Jup_DrawText(window, 10, window->height - 19, text, THEME_FONT_COLOR);
+	Jup_DrawText(&windowPixelArray, 10, window->height - 19, text, THEME_FONT_COLOR);
 }
 
 void drawBottomWidget() {
 	drawRectangle(&windowPixelArray,
 			0, window->height - BOTTOM_WIDGET_HEIGHT, window->width, BOTTOM_WIDGET_HEIGHT, THEME_BG_COLOR);
 	drawCoordinates();
+}
+
+void drawDialog() {
+    int w = 500;
+    int h = 300;
+
+    UIDialog dialog = {
+        .inputCount = 1
+    };
+
+    Dialog_DrawDialog(&windowPixelArray, &dialog);
 }
 
 void onLeftMouseDown() {
@@ -472,7 +407,7 @@ int main (int argc, char *argv[]) {
 	Jup_CreateWindowArgs create_window_args = {
 		.width = INITIAL_WINDOW_WIDTH,
 		.height = INITIAL_WINDOW_HEIGHT,
-		.windowTitle = "Pixelart Editor",
+		.windowTitle = (char *)"Pixelart Editor",
 		.frameBuffer = pixels,
 		.onClick = onMouseClick,
 		.onMouseRelease = onMouseRelease
@@ -488,10 +423,6 @@ int main (int argc, char *argv[]) {
 	if (argc > 1) {
 		loadImage(argv[1]);
 	}
-
-	topBar.boundary = (Rectangle) {
-		.x = 0, .y = 0, .width = window->width, .height = TOP_WIDGET_HEIGHT
-	};
 
 	palette.colors[0] = 0x000000;
 	palette.colors[1] = 0xFF0000;
@@ -511,11 +442,13 @@ int main (int argc, char *argv[]) {
 		pixels[i] = THEME_CLEAR_COLOR;
 	}
 
-	drawRectangleRect(&windowPixelArray, topBar.boundary, 0x999999);
-	createToolsWidget();
-
+	createTopWidget();
+	drawTopWidget();
 	drawBottomWidget();
+
+	createToolsWidget();
 	drawToolsWidget();
+
 	drawPaletteWidget();
 
 	struct timespec requestedTime = { .tv_sec = 0, .tv_nsec = 16666667 };
@@ -537,6 +470,8 @@ int main (int argc, char *argv[]) {
 
 		drawCoordinates();
 		drawCanvas();
+		drawDialog();
+
 		Jup_DrawPixels(window);
 
 		nanosleep(&requestedTime, &remainingTime);
