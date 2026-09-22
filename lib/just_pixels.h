@@ -19,9 +19,12 @@ typedef struct {
 	float mouseX;
 	float mouseY;
 	bool mouseDown[JUP_MOUSE_BUTTONS_CAPACITY];
+	bool shiftPressed;
 	uint32_t *frameBuffer;
 	void (*onClick)(float x, float y, int mouseBtn);
 	void (*onMouseRelease)(float x, float y, int mouseBtn);
+	void (*onKeyPressed)(int keyCode);
+	void (*onKeyReleased)(int keyCode);
 	Jup_X11Context context;
 } Jup_Window;
 
@@ -32,6 +35,8 @@ typedef struct {
 	uint32_t *frameBuffer;
 	void (*onClick)(float x, float y, int mouseBtn);
 	void (*onMouseRelease)(float x, float y, int mouseBtn);
+	void (*onKeyPressed)(int keyCode);
+	void (*onKeyReleased)(int keyCode);
 } Jup_CreateWindowArgs;
 
 Jup_Window* Jup_CreateWindow(Jup_CreateWindowArgs args);
