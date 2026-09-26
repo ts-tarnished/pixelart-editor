@@ -19,6 +19,6 @@ typedef struct {
 UIDialog Dialog_CreateDialog(char dialogTitle[], int inputCount);
 void Dialog_AddInput(UIDialog* dialog, UITextInput input);
 void Dialog_DrawDialog(PixelArray* window, UIDialog* dialog);
-void Dialog_TriggerKeyPressed(UIDialog* dialog, int keyCode, bool shift);
+void Dialog_TriggerKeyPressed(UIDialog* dialog, int keysym, char c);
 void Dialog_TriggerMouseClicked(UIDialog* dialog, int mouseButton, int x, int y);
 void Dialog_FreeDialog(UIDialog* dialog);

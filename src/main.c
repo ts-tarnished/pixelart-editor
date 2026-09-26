@@ -396,8 +396,8 @@ void onMouseRelease(float, float, int mouseButton) {
     drawingToolOnMouseRelease(canvasX, canvasY);
 }
 
-void onKeyPressed(int keyCode) {
-    Dialog_TriggerKeyPressed(&dialog, keyCode, window->shiftPressed);
+void onKeyPressed(int keysym, char c) {
+    Dialog_TriggerKeyPressed(&dialog, keysym, c);
 }
 
 int main (int argc, char *argv[]) {

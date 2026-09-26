@@ -2,6 +2,7 @@
 #include "just_pixels.h"
 #include "pixelart_editor_typedef.h"
 #include "ts_sw_graphics.h"
+#include <X11/X.h>
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -17,23 +18,31 @@ void Dialog_Open(Jup_Window w, void (*onSubmitCallback)(void)) {
     onSubmit = onSubmitCallback;
 }
 
-void Dialog_TriggerKeyPressed(UIDialog *dialog, int keyCode, bool shift) {
+void Dialog_TriggerKeyPressed(UIDialog *dialog, int keysym, char c) {
+    if (keysym == 65289) {
+        // Tab
+        dialog->focusedInput += 1;
+        if (dialog->focusedInput >= dialog->inputCount)
+            dialog->focusedInput = 0;
+        return;
+    }
+
     if (dialog->focusedInput < 0) {
         return;
     }
 
     UITextInput *input = &dialog->inputs[dialog->focusedInput];
+    int maxChars = (dialog->inputs[dialog->focusedInput].collider.width - 5 * 2) / 8;
 
-    printf("Dialog: %i\n", keyCode);
-    if (keyCode == 65293) {
+    if (keysym == 65293) {
         // Enter
     }
-    if (keyCode == 65307) {
+    if (keysym == 65307) {
         // Escape
     }
 
     size_t len = strlen(input->value);
-    if (keyCode == 65288) {
+    if (keysym == 65288) {
         // Backspace
         if (len > 0) {
             input->value[len - 1] = '\0';
@@ -41,20 +50,20 @@ void Dialog_TriggerKeyPressed(UIDialog *dialog, int keyCode, bool shift) {
         return;
     }
 
-    if (isalnum(keyCode) == 0)
+    if (keysym >= 0x100) {
         return;
-
-    if (len >= 367)
-        return;
-
-    if (shift) {
-        if(isalnum(keyCode)) {
-            sprintf(input->value, "%s%c", input->value, toupper(keyCode));
-            return;
-        }
     }
 
-    sprintf(input->value, "%s%c", input->value, (char)keyCode);
+    if (iscntrl(keysym) != 0)  {
+       return;
+    }
+
+    if (len >= maxChars)
+        return;
+
+    printf("%c\n", c);
+
+    sprintf(input->value, "%s%c", input->value, c);
 }
 
 void Dialog_TriggerMouseClicked(UIDialog *dialog, int mouseButton, int x,
@@ -110,6 +119,7 @@ void Dialog_TriggerMouseClicked(UIDialog *dialog, int mouseButton, int x,
         int labelHeight = 14;
         int inputHeight = 30;
         int labelMargin = 5;
+        int labelPadding = 5;
         int fieldsetHeight = inputHeight + labelHeight + labelMargin;
         int fieldsetMargin = 20;
         int buttonHeight = 30;
@@ -144,11 +154,13 @@ void Dialog_TriggerMouseClicked(UIDialog *dialog, int mouseButton, int x,
             dialog->inputs[i].collider = r;
             if (dialog->focusedInput == i) {
                 drawRectangleRecBordered(window, r, 2, 0xFFFFFF, 0xFF0000);
+                int cursorX = innerX + labelPadding + 8 * strlen(dialog->inputs[i].value);
+                drawLine(window, cursorX, y + 6, cursorX, y + r.height - 8, 0);
             } else {
                 drawRectangleRecBordered(window, r, 1, 0xFFFFFF, 0);
             }
 
-            Jup_DrawText(window, innerX + 5, y + 8, dialog->inputs[i].value, 0);
+            Jup_DrawText(window, innerX + labelPadding, y + 8, dialog->inputs[i].value, 0);
 
             y += inputHeight;
             y = (i == dialog->inputCount - 1) ? y : y + fieldsetMargin;

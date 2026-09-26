@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -90,7 +91,6 @@ Jup_Window* Jup_CreateWindow(Jup_CreateWindowArgs args) {
     window->frameBuffer = args.frameBuffer;
     window->mouseX = 9999;
     window->mouseY = 9999;
-    window->shiftPressed = false;
     for (int i = 0; i < JUP_MOUSE_BUTTONS_CAPACITY; i++) {
         window->mouseDown[i] = false;
     }
@@ -142,19 +142,20 @@ bool Jup_WindowShouldClose(Jup_Window *jupWindow) {
         }
 
         if (event.type == KeyPress) {
-            KeySym keysym = XLookupKeysym(&event.xkey, 0);
-            char* str = XKeysymToString(keysym);
-            if (keysym == 0xffe1 || keysym == 0xffe2)
-                jupWindow->shiftPressed = true;
-            jupWindow->onKeyPressed(keysym);
+            char c = 0;
+            char buf[1];
+            KeySym keysym;
+            int len = XLookupString(&event.xkey, buf, sizeof(buf), &keysym, NULL);
+            if (len == 1) {
+                c = buf[0];
+            }
+
+            jupWindow->onKeyPressed(keysym, c);
         }
 
         if (event.type == KeyRelease) {
             KeySym keysym = XLookupKeysym(&event.xkey, 0);
-            if (keysym == 0xffe1 || keysym == 0xffe2)
-                jupWindow->shiftPressed = false;
         }
-
     }
 
     return 0;
